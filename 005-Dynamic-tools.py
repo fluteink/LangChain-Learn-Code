@@ -191,19 +191,50 @@ def store_based_tools(
     request: ModelRequest,
     handler: Callable[[ModelRequest], ModelResponse]
 ) -> ModelResponse:
-    """根据存储偏好过滤工具。"""
+    """
+    根据 Store 中保存的用户功能开关动态过滤工具。
+
+    作用与意义：
+    1. 在模型真正推理前，按“当前用户可用能力”裁剪工具列表。
+    2. 避免模型看到无权限工具，减少误调用与越权风险。
+    3. 把“权限/功能开关”与“工具实现”解耦，便于集中治理。
+    """
+
+    # \[步骤 1\] 从运行时上下文读取当前用户标识。
+    # 含义：后续所有功能开关查询都要以 user\_id 为主键。
+    # 前提：调用 agent.invoke(...) 时已在 context 中传入 user\_id。
     user_id = request.runtime.context.user_id
 
-    # 从 Store 中读取：获取用户已启用的功能
+    # \[步骤 2\] 获取当前运行时绑定的 Store 实例。
+    # 含义：Store 是功能开关/偏好配置的来源，可按命名空间 + key 查询。
     store = request.runtime.store
+
+    # \[步骤 3\] 读取该用户在 features 命名空间下的功能配置。
+    # 参数说明：
+    # - ("features",): 一级命名空间，表示“功能开关”域
+    # - user\_id: 用户键
+    # 返回值通常是一个记录对象（存在时）或 None（不存在时）。
     feature_flags = store.get(("features",), user_id)
 
+    # \[步骤 4\] 仅当查到配置时才执行工具过滤。
+    # 含义：无配置时保持默认工具集，避免把所有工具误清空。
     if feature_flags:
+        # \[步骤 4.1\] 读取允许的工具白名单（enabled\_tools）。
+        # 语义：只有在这个列表中的工具，才会暴露给模型。
+        # 默认 []：当字段缺失时，结果为空白名单（最严格）。
         enabled_features = feature_flags.value.get("enabled_tools", [])
-        # 仅包含该用户已启用的工具
+
+        # \[步骤 4.2\] 按白名单过滤当前请求中的工具。
+        # 含义：把“系统全量工具”裁剪为“当前用户可见工具”。
+        # 好处：模型侧天然无法调用未启用工具，降低策略绕过风险。
         tools = [t for t in request.tools if t.name in enabled_features]
+
+        # \[步骤 4.3\] 生成一个覆盖了 tools 的新请求对象。
+        # 含义：不直接修改原请求，符合中间件链式处理的不可变风格。
         request = request.override(tools=tools)
 
+    # \[步骤 5\] 把（可能已过滤的）请求交给下游处理器继续执行。
+    # 含义：中间件只负责“改请求”，真正推理仍由后续 handler 完成。
     return handler(request)
 
 @tool
