@@ -62,14 +62,6 @@ def print_agent_result(title, result):
     if messages:
         last_msg = messages[-1]
         print(f"最终结果：\n" + "*" * 50 + "\n" + f"{getattr(last_msg, 'content', '')}" + "\n" + "*" * 50)
-
-def print_structured_response(title, result):
-    """打印结构化输出对象，方便对照字段是否提取成功。"""
-    print(f"\n{title}")
-    structured = result.get("structured_response")
-    print("*" * 50)
-    print(structured)
-    print("*" * 50)
 ####基本配置-END####
 
 from langchain.agents import create_agent
