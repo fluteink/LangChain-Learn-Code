@@ -82,15 +82,13 @@ load_dotenv()
 # MODELSCOPE_API_KEY = os.getenv("ModelScope_API_KEY")
 # MODELSCOPE_BASE_URL = os.getenv("ModelScope_BASE_URL")
 HF_TOKEN = os.getenv("HF_TOKEN")
-# print(f"ModelScope API Key: {MODELSCOPE_API_KEY}\nModelScope Base URL: {MODELSCOPE_BASE_URL}")
-from langchain_openai import OpenAIEmbeddings
-
-from langchain_huggingface import HuggingFaceEmbeddings
-
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
-from huggingface_hub import login
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 os.environ["HF_TOKEN"] = HF_TOKEN
+os.environ["HTTP_PROXY"] = "http://127.0.0.1:7897"
+os.environ["HTTPS_PROXY"] = "http://127.0.0.1:7897"
+os.environ["ALL_PROXY"] = "socks5://127.0.0.1:7897"
+# print(f"ModelScope API Key: {MODELSCOPE_API_KEY}\nModelScope Base URL: {MODELSCOPE_BASE_URL}")
+from langchain_huggingface import HuggingFaceEmbeddings
+embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
 
 vector_1 = embeddings.embed_query(all_splits[0].page_content)
 vector_2 = embeddings.embed_query(all_splits[1].page_content)
@@ -107,16 +105,6 @@ LangChain 包含一套与不同向量存储技术集成的 集成。一些向量
 一些（如 Postgres）在单独的基础设施中运行，可以在本地运行或通过第三方运行；其他可以在内存中运行以处理轻量级工作负载。让我们选择一个向量存储：
 """
 
-# from langchain_core.vectorstores import InMemoryVectorStore
-#
-# vector_store = InMemoryVectorStore(embeddings)
-#
-# valid_splits = [d for d in all_splits if d.page_content and d.page_content.strip()]
-#
-# ids = []
-# for i in range(0, len(valid_splits), 16):
-#     batch = valid_splits[i:i + 16]
-#     ids.extend(vector_store.add_documents(documents=batch))
 
 from langchain_core.vectorstores import InMemoryVectorStore
 
@@ -139,4 +127,89 @@ ids = vector_store.add_documents(documents=all_splits)
 而无需了解文档中使用的任何特定关键术语。
 基于与字符串查询的相似性返回文档：
 """
+print("\n查询：How many distribution centers does Nike have in the US?\n")
+results = vector_store.similarity_search(
+    "How many distribution centers does Nike have in the US?"
+)
 
+print(results[0])
+"""
+# 异步查询：
+results = await vector_store.asimilarity_search("When was Nike incorporated?")
+
+print(results[0])
+"""
+
+# 返回分数：
+# 请注意，不同提供商实现不同的分数；这里的分数
+# 是一个与相似性成反比的距离度量。
+print("\n查询：耐克 2023 年的收入是多少？\n")
+results = vector_store.similarity_search_with_score("耐克 2023 年的收入是多少？")
+doc, score = results[0]
+print(f"分数：{score}\n")
+print(doc)
+
+
+# 基于与嵌入查询的相似性返回文档：
+print("\n查询：耐克 2023 年的利润率受到什么影响？\n")
+embedding = embeddings.embed_query("耐克 2023 年的利润率受到什么影响？")
+
+results = vector_store.similarity_search_by_vector(embedding)
+print(results[0])
+
+"""
+4. 检索器
+LangChain VectorStore 对象不继承 Runnable。LangChain 检索器 是 Runnable，
+因此它们实现了一组标准方法（例如同步和异步的 invoke 和 batch 操作）。
+虽然我们可以从向量存储构建检索器，但检索器也可以与非向量存储的数据源交互（例如外部 API）。
+
+我们可以自己创建一个简单的版本，而无需继承 Retriever。如果我们选择希望使用什么方法来检索文档，
+我们可以轻松创建一个可运行对象。下面我们将围绕 similarity_search 方法构建一个：
+"""
+from typing import List
+from langchain_core.documents import Document
+from langchain_core.runnables import chain
+@chain
+def retriever(query: str) -> List[Document]:
+    return vector_store.similarity_search(query, k=1)
+print("\n批量查询\n")
+
+batch_results = retriever.batch(
+    [
+        "耐克在美国有多少个分销中心？",
+        "耐克是什么时候成立的？",
+    ],
+)
+print(batch_results)
+
+batch_results_2 = retriever.batch(
+    [
+        "How many distribution centers does Nike have in the US?",
+        "When was Nike incorporated?",
+    ],
+)
+print(batch_results_2)
+"""
+向量存储实现了 as_retriever 方法，该方法将生成一个检索器，具体是 VectorStoreRetriever。
+这些检索器包含特定的 search_type 和 search_kwargs 属性，用于标识要调用的底层向量存储方法，
+以及如何参数化它们。例如，我们可以使用以下方式复制上面的内容：
+"""
+print("\nas_retriever演示\n")
+retriever = vector_store.as_retriever(
+    search_type="similarity",
+    search_kwargs={"k": 1},
+)
+
+as_retriever_results = retriever.batch(
+    [
+        "How many distribution centers does Nike have in the US?",
+        "When was Nike incorporated?",
+    ],
+)
+print(as_retriever_results)
+"""
+VectorStoreRetriever 支持 "similarity"（默认）、"mmr"（最大边际相关性，如上所述）和 "similarity_score_threshold" 搜索类型。
+我们可以使用后者通过相似性分数对检索器输出的文档进行阈值处理。
+检索器可以轻松集成到更复杂的应用程序中，例如 检索增强生成 (RAG) 应用程序，该应用程序将给定问题与检索到的上下文结合到 LLM 的提示中。
+要了解有关构建此类应用程序的更多信息，请查看 RAG 教程 教程。
+"""
