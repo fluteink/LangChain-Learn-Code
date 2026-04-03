@@ -82,7 +82,7 @@ load_dotenv()
 # MODELSCOPE_API_KEY = os.getenv("ModelScope_API_KEY")
 # MODELSCOPE_BASE_URL = os.getenv("ModelScope_BASE_URL")
 HF_TOKEN = os.getenv("HF_TOKEN")
-print(f"ModelScope API Key: {MODELSCOPE_API_KEY}\nModelScope Base URL: {MODELSCOPE_BASE_URL}")
+# print(f"ModelScope API Key: {MODELSCOPE_API_KEY}\nModelScope Base URL: {MODELSCOPE_BASE_URL}")
 from langchain_openai import OpenAIEmbeddings
 
 from langchain_huggingface import HuggingFaceEmbeddings
